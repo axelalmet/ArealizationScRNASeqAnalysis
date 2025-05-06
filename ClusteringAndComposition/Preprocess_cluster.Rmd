@@ -1,0 +1,151 @@
+## This file includes:
+## 1. Preprocessing 
+## 2. Clustering
+## 3. Subclustering
+## 4. Combine different samples 
+
+## Seurat preprocessing and clustering 
+```{r}
+library(Seurat)
+library(harmony)
+library(dplyr)
+library(patchwork)
+library(SeuratData)
+data=Read10X(data.dir="../Raw_data/all_well/",gene.column=1)
+data=CreateSeuratObject(counts = data, project = "all_well", min.cells = 3, min.features = 200)
+```
+
+
+```{r}
+data[["percent.mt"]] <- PercentageFeatureSet(data, pattern = "^MT-") 
+data <- subset(data, subset = nFeature_RNA > 500 & nFeature_RNA < 25000 & percent.mt<5) 
+data <- NormalizeData(data, normalization.method = "LogNormalize", scale.factor = 10000)
+data <- FindVariableFeatures(data, selection.method = "vst", nfeatures = 2000)
+all.genes <- rownames(data)
+data <- ScaleData(data, features = all.genes)
+data <- RunPCA(data, features = VariableFeatures(object = data))
+data <- FindNeighbors(data, dims = 1:15)
+data <- FindClusters(data, resolution = 0.5)
+data <- RunUMAP(data, dims = 1:15)
+```
+
+
+```{r}
+# Visualize clustering in UMAP 
+DimPlot(data, reduction = "umap")
+```
+
+
+## Find markers
+```{r}
+data.markers <- FindAllMarkers(data, only.pos = TRUE)
+data.markers %>%
+    group_by(cluster) %>%
+    dplyr::filter(avg_log2FC > 1)
+```
+
+
+## Draw feature plots of different genes 
+```{r}
+FeaturePlot(data, features = c("gene1","gene2")) # Change gene names to your desired gene names 
+```
+
+
+## Assign cell types 
+```{r}
+new.cluster.ids <- c("cluster1_name","cluster2_name","cluster3_name","cluster4_name") # Change the cluster names to your desired cluster names 
+names(new.cluster.ids) <- levels(data)
+data <- RenameIdents(data, new.cluster.ids)
+```
+
+
+## Visualize cell type clustering in UMAP 
+```{r}
+DimPlot(data, reduction = "umap") 
+```
+
+
+## Save data
+```{r}
+saveRDS(data, file = "../data.rds") 
+```
+
+
+## Subclustering
+
+# Subcluster "Choroid plexus+alpha" into 2 subclusters
+
+```{r}
+# Lots of iterations are done to obtain the optimal subclusters 
+cluster = subset(data, idents = "CP") # If you wish to sucbluster another cluster, change idents to your desired cluster
+cluster <- RunPCA(cluster, features = VariableFeatures(object = cluster))
+cluster <- FindNeighbors(cluster, dims = 1:10)
+cluster <- FindClusters(cluster, resolution = 0.2)
+cluster <- RunUMAP(cluster, dims = 1:10)
+DimPlot(cluster, reduction = "umap",label=T)
+c0_markers <- FindMarkers(cluster, ident.1 = 0, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+c1_markers <- FindMarkers(cluster, ident.1 = 1, logfc.threshold = 0.25, test.use = "roc", only.pos = TRUE)
+```
+
+
+# Use subclusters for annotations in the original data 
+```{r}
+data$subcluster = as.character(Idents(data))
+data$subcluster[Cells(cluster)] = paste("CP",Idents(cluster)) # Change old cluster name from CP to your desired cluster name 
+Idents(data) = data$subcluster
+DimPlot(data,group.by="subcluster",reduction="umap",label=T)
+```
+
+# Rename clusters  
+```{r}
+data <- RenameIdents(data = data, 'cluster_old' = "cluster_new") # rename cluster_old to cluster_new
+```
+
+
+## Combine different objects
+```{r}
+combined <- merge(ctr_D35, y = list(ctr_D56, ctr_D97, D35_BMP, D56_BMP, D97_BMP, D35_BMP, D56_BMP, D97_BMP), project = "CombinedProject")
+```
+
+
+```{r}
+combined <- NormalizeData(combined)
+combined <- FindVariableFeatures(combined, selection.method = "vst", nfeatures = 2000)
+combined <- ScaleData(combined)
+combined <- RunPCA(combined, features = VariableFeatures(object = combined))
+combined <- FindNeighbors(combined, dims = 1:15)
+combined <- RunUMAP(combined, dims = 1:15)
+DimPlot(combined, reduction = "umap")
+```
+
+
+
+# Go terms enrichment analysis
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(DOSE)
+```
+
+```{r}
+genes = c("gene1","gene2") # Change into the genes of your interest 
+
+ego <- enrichGO(gene         = genes,
+                OrgDb        = org.Hs.eg.db,
+                keyType      = "SYMBOL",      
+                ont          = "ALL",         # Ontology: BP, CC, MF, or ALL
+                pAdjustMethod = "BH",         # p-value adjustment method
+                pvalueCutoff  = 0.05,         # p-value cutoff
+                qvalueCutoff  = 0.05,         # q-value cutoff
+                readable      = FALSE)
+# View results
+head(ego)
+dotplot(ego, showCategory = 10, orderBy = "GeneRatio") + ggtitle("GO Enrichment Dotplot")
+```
+
+
+
+
+
+

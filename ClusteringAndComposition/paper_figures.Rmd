@@ -1,0 +1,223 @@
+## This file includes:
+## 1. Color code the combined UMAP according to time and condition
+## 2. Plot relevant markers in a dot plot 
+## 3. Bar plot of cell type composition at each time point 
+## 4. Gene expression heatmaps/trends 
+
+
+# Visualize UMAP annotations 
+```{r}
+# Color code the combined UMAP according to days 
+DimPlot(data, reduction = "umap", group.by=="day")
+
+# Color code the combined UMAP according to conditions 
+DimPlot(data, reduction = "umap", group.by=="condition")
+```
+
+
+
+# Plot relevant markers in a dot plot  
+```{r}
+# Create a new column in meta data called day_celltypes that contain both day and celltypes information 
+combined$day_celltypes = paste(combined$day, combined$celltypes, sep = "_") 
+genes = c("SOX2", "TNC", "LIFR", "HOPX", "LHX2", "EOMES", "TOP2A", "MKI67", "TBR1", "BCL11B", "RELN", "SATB2", "CUX2", "GAD1", "DLX5", "DLX6", "RSPO2", "LMX1A", "OTX2", "TTR", "PAX3", "PAX7", "NEAT1", "VEGFA")
+
+# Visualize dot plot 
+DotPlot(combined, features = genes, group.by="day_celltypes") + RotatedAxis() 
+```
+
+
+# Cell type composition bar plot 
+```{r}
+# "#e5c494" 
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+custom_colors <- c("#1f78b4", "#33a02c", "#e31a1c", "#ff7f00", "#6a3d9a", 
+                   "#b15928", "#a6cee3", "#b2df8a", "#fb9a99", "#fdbf6f", 
+                   "#cab2d6", "#ffff99", "#a6d854", "#ffd92f", 
+                   "#8da0cb")
+
+metadata <- combined@meta.data
+
+# cell number per sample: 
+cell_type_summary <- metadata %>%
+  group_by(orig_samples,celltypes) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+# cell type per sample: 
+cell_type_summary <- metadata %>%
+  group_by(celltypes, condition) %>%
+  summarise(n = n()) %>%
+  ungroup()
+
+# Calculate proportions of each cell type within each time point
+cell_type_summary <- cell_type_summary %>%
+  group_by(condition) %>%
+  mutate(proportion = n / sum(n))
+
+# compare cell type information by conditions 
+cell_type_summary <- cell_type_summary %>%
+  mutate(condition = factor(condition, levels = c("FGF","ctr","BMP")))
+
+# Visualize cell type summary 
+ggplot(cell_type_summary, aes(x = condition, y = proportion, fill = celltypes)) +
+  geom_bar(stat = "identity", position = "fill") +  # Stacked barplot with proportions
+  theme_minimal() +
+  labs(x = "Condition", y = "Proportion", fill = "Cell Type") +
+  scale_fill_manual(values = custom_colors) +  # Use a color palette for cell types
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+```
+
+
+# Plot gene expression heatmaps 
+
+```{r}
+library(readxl)
+file_path <- "your_path" # Modify to your own path of file 
+your_file <- as.data.frame(read_excel(file_path)) # Read the file that contains all gene names you wish to visualize (as an example, see the Excel sheet sent by Momoko) 
+```
+
+
+```{r}
+library(pheatmap)
+library(RColorBrewer)
+
+D35_sample = c("YC44","KS108")
+D56_sample = c("YC36","YC46")
+D97_sample = c("YC34","YC40")
+
+# Create a dictionary mapping shorthand to full cell type names
+celltype_dict <- list(
+  "ULN" = "ULN",
+  "DLN" = "DLN",
+  "NN" = "newborn neurons",
+  "IP" = "IP",
+  "aRGoRG" = "aRG/oRG",
+  "CC" = "cycling cells",
+  "PPCR" = "PP/CR",
+  "aRG" = "aRG"  
+)
+
+for (colname in colnames(Momoko_file)) {
+  print(colname)
+  split_parts <- unlist(strsplit(colname, "_"))
+  day <- split_parts[1] 
+  celltype <- split_parts[2] 
+  if (celltype != "aRG"){
+    subdata = subset(combined, day == day & celltypes == celltype_dict[[celltype]])}
+  else{
+    subdata = subset(combined, day==day & (celltypes == "aRG"|celltypes=="oRG-like cells"))
+  }
+  gene_ls = your_file[[colname]][!is.na(your_file[[colname]])]
+  res = AverageExpression(subdata,features=gene_ls,group.by=c("celltypes","condition","orig_samples")) 
+  
+  if (day == "D35") {
+    sample_id <- D35_sample
+  } else if (day == "D56") {
+    sample_id <- D56_sample
+  } else {
+    sample_id <- D97_sample  # Optional: handle other cases if needed
+  }
+  
+  if (celltype != "aRG"){
+    data <- res$RNA[, c(paste0(celltype_dict[[celltype]], "_FGF_", sample_id[1], "-", day, "-FGF"),
+                        paste0(celltype_dict[[celltype]], "_FGF_", sample_id[2], "-", day, "-FGF"),
+                        paste0(celltype_dict[[celltype]], "_ctr_", sample_id[1], "-", day, "-ctr"),
+                        paste0(celltype_dict[[celltype]], "_ctr_", sample_id[2], "-", day, "-ctr"),
+                        paste0(celltype_dict[[celltype]], "_BMP_", sample_id[1], "-", day, "-BMP"),
+                        paste0(celltype_dict[[celltype]], "_BMP_", sample_id[2], "-", day, "-BMP"))]}
+  else{
+    data <- res$RNA[, c(paste0("oRG-like cells", "_FGF_", sample_id[1], "-", day, "-FGF"),
+                        paste0("oRG-like cells", "_FGF_", sample_id[2], "-", day, "-FGF"),
+                        paste0(celltype_dict[[celltype]], "_FGF_", sample_id[1], "-", day, "-FGF"), 
+                        paste0(celltype_dict[[celltype]], "_FGF_", sample_id[2], "-", day, "-FGF"),
+                        paste0(celltype_dict[[celltype]], "_ctr_", sample_id[1], "-", day, "-ctr"),
+                        paste0(celltype_dict[[celltype]], "_ctr_", sample_id[2], "-", day, "-ctr"),
+                        paste0(celltype_dict[[celltype]], "_BMP_", sample_id[1], "-", day, "-BMP"),
+                        paste0(celltype_dict[[celltype]], "_BMP_", sample_id[2], "-", day, "-BMP"))]   
+  }
+  data = log2(data+1e-5)  
+  breaks <- seq(-5, 5, length.out = 100) 
+  your_dir = "..." # Your own direction + /figure name 
+  pdf(paste0(your_dir, colname, ".pdf"), width = 6, height = length(gene_ls)/5+5)
+  my_palette <- colorRampPalette(rev(brewer.pal(n=11, name='RdBu')))(100)
+  pheatmap(data, breaks=breaks,cluster_cols = FALSE,cluster_rows=FALSE, color = my_palette) 
+  dev.off()
+}
+```
+
+
+# Plot gene expression heatmaps (Optional: use this if you wish to work one by one for each sample manually) 
+```{r}
+D97_ULN = subset(combined, day == "D97" & celltypes == "ULN")
+D97_DLN = subset(combined, day == "D97" & celltypes == "DLN")
+D97_NN = subset(combined, day == "D97" & celltypes == "newborn neurons")
+D97_IP = subset(combined, day == "D97" & celltypes == "IP")
+D97_aRGoRG = subset(combined, day == "D97" & celltypes == "aRG/oRG")
+D97_CC = subset(combined, day == "D97" & celltypes == "cycling cells")
+D56_DLN = subset(combined, day == "D56" & celltypes == "DLN")
+D56_NN = subset(combined, day == "D56" & celltypes == "newborn neurons")
+D56_IP = subset(combined, day == "D56" & celltypes == "IP")
+D56_CC = subset(combined, day == "D56" & celltypes == "cycling cells")
+D35_PPCR = subset(combined, day == "D35" & celltypes == "PP/CR")
+D35_CC = subset(combined, day == "D35" & celltypes == "cycling cells")
+D35_IP = subset(combined, day == "D35" & celltypes == "IP")
+D35_aRG = subset(combined, day == "D35" & (celltypes == "aRG"|celltypes=="oRG-like cells"))  
+D56_aRG = subset(combined, day == "D56" & (celltypes == "aRG"|celltypes=="oRG-like cells"))  
+```
+
+
+```{r}
+gene_ls = c("gene1", "gene2") # Change to genes of your interest
+length(gene_ls)
+res = AverageExpression(data,features=gene_ls,group.by=c("celltypes","condition","orig_samples")) 
+```
+
+
+```{r}
+library(pheatmap)
+colnames = colnames(res$RNA)
+data <- res$RNA[,c("DLN_FGF_YC34-D97-FGF", "DLN_FGF_YC40-D97-FGF","DLN_ctr_YC34-D97-ctr", "DLN_ctr_YC40-D97-ctr","DLN_BMP_YC34-D97-BMP", "DLN_BMP_YC40-D97-BMP")] # Change to the form: celltype_condition_batch-day-condition 
+data = log2(data+1e-5)  
+breaks <- seq(-5, 5, length.out = 100) 
+pdf("your_dir", width = 6, height = length(gene_ls)/5) # Save figure to your desired directory 
+pheatmap(data, breaks=breaks,cluster_cols = FALSE,cluster_rows=FALSE) 
+```
+
+
+# Go terms enrichment analysis
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(DOSE)
+```
+
+
+```{r}
+genes = c("gene1","gene2") # Change into the genes of your interest 
+
+ego <- enrichGO(gene         = genes,
+                OrgDb        = org.Hs.eg.db,
+                keyType      = "SYMBOL",      
+                ont          = "ALL",         # Ontology: BP, CC, MF, or ALL
+                pAdjustMethod = "BH",         # p-value adjustment method
+                pvalueCutoff  = 0.05,         # p-value cutoff
+                qvalueCutoff  = 0.05,         # q-value cutoff
+                readable      = FALSE)
+# View results
+head(ego)
+dotplot(ego, showCategory = 10, orderBy = "GeneRatio") + ggtitle("GO Enrichment Dotplot")
+```
+
+
+
+
+
+
+
+
+
+
